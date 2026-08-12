@@ -62,10 +62,11 @@ pub enum Agent {
     Kilo,
     Qodercli,
     Maki,
+    Vibe,
 }
 
 impl Agent {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 22] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -87,9 +88,10 @@ impl Agent {
         Self::Kilo,
         Self::Qodercli,
         Self::Maki,
+        Self::Vibe,
     ];
 
-    pub const SCREEN_MANIFEST_AGENTS: [Self; 19] = [
+    pub const SCREEN_MANIFEST_AGENTS: [Self; 20] = [
         Self::Pi,
         Self::Claude,
         Self::Codex,
@@ -109,6 +111,7 @@ impl Agent {
         Self::Kilo,
         Self::Qodercli,
         Self::Maki,
+        Self::Vibe,
     ];
 }
 
@@ -135,6 +138,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
         Agent::Maki => "maki",
+        Agent::Vibe => "vibe",
     }
 }
 
@@ -167,6 +171,7 @@ pub fn interactive_agent_executable(agent: Agent) -> &'static str {
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
         Agent::Maki => "maki",
+        Agent::Vibe => "vibe",
     }
 }
 
@@ -203,6 +208,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
         "maki" => Some(Agent::Maki),
+        "vibe" | "mistral-vibe" => Some(Agent::Vibe),
         _ => None,
     }
 }
@@ -301,7 +307,7 @@ pub(crate) fn full_lifecycle_hook_authority(source: &str, agent_label: &str) -> 
 pub(crate) fn session_identity_only_integration(source: &str, agent_label: &str) -> bool {
     matches!(
         (source, agent_label),
-        ("herdr:hermes", "hermes") | ("herdr:antigravity_cli", "agy")
+        ("herdr:hermes", "hermes") | ("herdr:antigravity_cli", "agy") | ("herdr:vibe", "vibe")
     )
 }
 
@@ -710,6 +716,8 @@ mod tests {
         assert_eq!(identify_agent("kilo"), Some(Agent::Kilo));
         assert_eq!(identify_agent("kilo-code"), Some(Agent::Kilo));
         assert_eq!(identify_agent("maki"), Some(Agent::Maki));
+        assert_eq!(identify_agent("vibe"), Some(Agent::Vibe));
+        assert_eq!(identify_agent("mistral-vibe"), Some(Agent::Vibe));
     }
 
     #[test]
@@ -735,6 +743,8 @@ mod tests {
         assert_eq!(parse_agent_label("grok-build"), Some(Agent::Grok));
         assert_eq!(parse_agent_label("hermes-agent"), Some(Agent::Hermes));
         assert_eq!(parse_agent_label("maki"), Some(Agent::Maki));
+        assert_eq!(parse_agent_label("vibe"), Some(Agent::Vibe));
+        assert_eq!(parse_agent_label("mistral-vibe"), Some(Agent::Vibe));
         assert_eq!(parse_agent_label("kilo-code"), Some(Agent::Kilo));
     }
 
@@ -778,6 +788,7 @@ mod tests {
             (Agent::Kilo, "kilo"),
             (Agent::Qodercli, "qodercli"),
             (Agent::Maki, "maki"),
+            (Agent::Vibe, "vibe"),
         ];
         assert_eq!(expected.len(), Agent::ALL.len());
         for (agent, executable) in expected {
@@ -807,6 +818,7 @@ mod tests {
         for (source, label, agent) in [
             ("herdr:hermes", "hermes", Agent::Hermes),
             ("herdr:antigravity_cli", "agy", Agent::Antigravity),
+            ("herdr:vibe", "vibe", Agent::Vibe),
         ] {
             assert!(!full_lifecycle_hook_authority(source, label));
             assert!(session_identity_only_integration(source, label));

@@ -1,0 +1,59 @@
+id = "vibe"
+version = "2026.08.13.1"
+min_engine_version = 3
+updated_at = "2026-08-13T00:00:00Z"
+aliases = ["mistral-vibe"]
+
+# Evidence: Mistral Vibe 2.24.0 live bottom-buffer text and ANSI pane reads.
+# Vibe randomizes its working status labels, so the working rule matches only
+# the stable elapsed-time interrupt hint. Permission and question dialogs use
+# complete control sets to avoid treating transcript prose as live UI. The
+# session picker is a viewer and must not replace the prior lifecycle state.
+
+[[rules]]
+id = "permission_dialog_blocked"
+state = "blocked"
+priority = 1300
+region = "whole_recent"
+visible_blocker = true
+contains = [
+  "Allow once",
+  "Allow for remainder of this session",
+  "Always allow",
+  "Deny",
+]
+line_regex = [
+  '(?i)Permission for the .+ tool(?:\s+\([^)]*\))?',
+  '(?i)↑↓/jk\s+navigate\s+Enter\s+select\s+Esc\s+reject',
+]
+
+[[rules]]
+id = "question_dialog_blocked"
+state = "blocked"
+priority = 1290
+region = "whole_recent"
+visible_blocker = true
+contains = ["Type your answer..."]
+line_regex = [
+  '(?:^|[│┃])\s*[›>▸]?\s*[0-9]+\.\s+\S',
+  '(?i)↑↓/jk\s+navigate\s+Enter\s+(?:select|toggle)\s+Esc\s+cancel',
+]
+
+[[rules]]
+id = "session_picker"
+state = "unknown"
+priority = 1250
+region = "whole_recent"
+skip_state_update = true
+line_regex = [
+  '(?i)(?:^|[│┃])\s*local\s+(?:[/\\].+|[A-Za-z]:[\\/].*)',
+  '(?i)↑↓/jk\s+Navigate\s+Enter\s+Select\s+d\s+Delete\s+Esc\s+Cancel',
+]
+
+[[rules]]
+id = "loading_indicator_working"
+state = "working"
+priority = 1100
+region = "bottom_non_empty_lines(8)"
+visible_working = true
+line_regex = ['\((?:\d+h)?(?:\d+m)?\d+(?:\.\d+)?s Esc/Ctrl\+C to interrupt\)\s*$']

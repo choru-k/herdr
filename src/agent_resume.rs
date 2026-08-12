@@ -89,6 +89,7 @@ pub fn is_reserved_native_state_source(source: &str, agent: &str) -> bool {
             | ("herdr:qodercli", "qodercli")
             | ("herdr:cursor", "cursor")
             | ("herdr:grok", "grok")
+            | ("herdr:vibe", "vibe")
     )
 }
 
@@ -202,6 +203,9 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         ("herdr:grok", "grok", AgentSessionRefKind::Id) => {
             vec!["grok".into(), "--resume".into(), session_ref.value.clone()]
         }
+        ("herdr:vibe", "vibe", AgentSessionRefKind::Id) => {
+            vec!["vibe".into(), "--resume".into(), session_ref.value.clone()]
+        }
         _ => return None,
     };
 
@@ -238,6 +242,7 @@ pub(crate) fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:cursor", "cursor")
             | ("herdr:antigravity_cli", "agy")
             | ("herdr:grok", "grok")
+            | ("herdr:vibe", "vibe")
     )
 }
 
@@ -274,6 +279,35 @@ mod tests {
             "herdr:opencode",
             "opencode"
         ));
+    }
+
+    #[test]
+    fn vibe_native_state_source_is_reserved() {
+        assert!(is_reserved_native_state_source("herdr:vibe", "vibe"));
+        assert!(!is_reserved_native_state_source("custom:vibe", "vibe"));
+    }
+
+    #[test]
+    fn vibe_source_is_official_only_for_vibe_agent() {
+        assert!(is_official_agent_source("herdr:vibe", "vibe"));
+        assert!(!is_official_agent_source("herdr:vibe", "mistral-vibe"));
+    }
+
+    #[test]
+    fn vibe_id_resume_plan_uses_explicit_session() {
+        let plan = plan(
+            "herdr:vibe",
+            "vibe",
+            &AgentSessionRef::id("vibe-session").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plan.argv, vec!["vibe", "--resume", "vibe-session"]);
+    }
+
+    #[test]
+    fn vibe_resume_rejects_transcript_path_reference() {
+        let path = absolute_test_path("vibe-session.jsonl");
+        assert!(plan("herdr:vibe", "vibe", &AgentSessionRef::path(path).unwrap()).is_none());
     }
 
     #[test]

@@ -44,6 +44,7 @@ pub struct AgentSoundOverrides {
     pub kilo: AgentSoundSetting,
     pub qodercli: AgentSoundSetting,
     pub maki: AgentSoundSetting,
+    pub vibe: AgentSoundSetting,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
@@ -140,6 +141,7 @@ impl AgentSoundOverrides {
             Some(Agent::Kilo) => self.kilo,
             Some(Agent::Qodercli) => self.qodercli,
             Some(Agent::Maki) => self.maki,
+            Some(Agent::Vibe) => self.vibe,
             None => AgentSoundSetting::Default,
         }
     }
@@ -179,6 +181,7 @@ impl Default for AgentSoundOverrides {
             kilo: AgentSoundSetting::Default,
             qodercli: AgentSoundSetting::Default,
             maki: AgentSoundSetting::Default,
+            vibe: AgentSoundSetting::Default,
         }
     }
 }
@@ -202,6 +205,7 @@ request_path = "/tmp/request.mp3"
 [ui.sound.agents]
 droid = "off"
 claude = "on"
+vibe = "on"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(config.ui.sound.enabled);
@@ -217,6 +221,11 @@ claude = "on"
         assert_eq!(config.ui.sound.agents.droid, AgentSoundSetting::Off);
         assert_eq!(config.ui.sound.agents.claude, AgentSoundSetting::On);
         assert_eq!(config.ui.sound.agents.pi, AgentSoundSetting::Default);
+        assert_eq!(config.ui.sound.agents.vibe, AgentSoundSetting::On);
+        assert_eq!(
+            config.ui.sound.agents.for_agent(Some(Agent::Vibe)),
+            AgentSoundSetting::On
+        );
     }
 
     #[test]

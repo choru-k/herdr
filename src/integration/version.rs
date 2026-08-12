@@ -17,6 +17,12 @@ pub(crate) fn agent_version_requirement(
             args: &["--version"],
             min_version: super::KIMI_MIN_VERSION,
         }),
+        crate::api::schema::IntegrationTarget::Vibe => Some(AgentVersionRequirement {
+            label: "mistral vibe",
+            binary: "vibe",
+            args: &["--version"],
+            min_version: super::VIBE_MIN_VERSION,
+        }),
         _ => None,
     }
 }

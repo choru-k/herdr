@@ -1335,6 +1335,7 @@ impl TerminalState {
                     Some("startup" | "new" | "resume" | "fork")
                 )
                 | ("herdr:antigravity_cli", "agy", None)
+                | ("herdr:vibe", "vibe", None)
         )
     }
 
@@ -4882,6 +4883,38 @@ mod tests {
                 .as_ref()
                 .map(|session| session.session_ref.value.as_str()),
             Some("opencode-new")
+        );
+    }
+
+    #[test]
+    fn vibe_session_report_replaces_existing_session_ref() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Vibe), AgentState::Idle);
+        terminal
+            .set_agent_session_ref(
+                "herdr:vibe".into(),
+                "vibe".into(),
+                crate::agent_resume::AgentSessionRef::id("vibe-old"),
+                Some(20),
+            )
+            .expect("initial session should be accepted");
+
+        let mutation = terminal
+            .set_agent_session_ref(
+                "herdr:vibe".into(),
+                "vibe".into(),
+                crate::agent_resume::AgentSessionRef::id("vibe-new"),
+                Some(21),
+            )
+            .expect("new Vibe session should replace the previous session");
+
+        assert!(mutation.session_ref_changed);
+        assert_eq!(
+            terminal
+                .persisted_agent_session
+                .as_ref()
+                .map(|session| session.session_ref.value.as_str()),
+            Some("vibe-new")
         );
     }
 

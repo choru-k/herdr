@@ -913,3 +913,63 @@ fn codex_osc_working_beats_weak_blocker_screen() {
         Some("osc_title_working")
     );
 }
+
+#[test]
+fn vibe_loading_indicator_is_working() {
+    let result = explain(Agent::Vibe, "Reasoning (12.4s Esc/Ctrl+C to interrupt)\n");
+
+    assert_eq!(result.state, AgentState::Working);
+    assert_eq!(
+        result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("loading_indicator_working")
+    );
+    assert!(result.visible_working);
+}
+
+#[test]
+fn vibe_permission_and_question_dialogs_are_blocked() {
+    let permission = "Permission for the bash tool (printf ok)\n\
+        Allow once\n\
+        Allow for remainder of this session\n\
+        Always allow\n\
+        Deny\n\
+        ↑↓/jk navigate Enter select Esc reject\n";
+    let question = "What should I do?\n\
+        1. Continue\n\
+        2. Stop\n\
+        Type your answer...\n\
+        ↑↓/jk navigate Enter select Esc cancel\n";
+
+    for screen in [permission, question] {
+        let result = explain(Agent::Vibe, screen);
+        assert_eq!(result.state, AgentState::Blocked);
+        assert!(result.visible_blocker);
+    }
+}
+
+#[test]
+fn vibe_session_picker_preserves_state_on_unix_and_windows() {
+    for header in ["local /Users/me/project", r"local C:\Users\me\project"] {
+        let screen = format!("{header}\n↑↓/jk Navigate Enter Select d Delete Esc Cancel\n");
+        let result = explain(Agent::Vibe, &screen);
+
+        assert_eq!(result.state, AgentState::Unknown);
+        assert_eq!(
+            result.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+            Some("session_picker")
+        );
+        assert!(result.skip_state_update);
+    }
+}
+
+#[test]
+fn vibe_unmatched_screen_uses_known_agent_idle_fallback() {
+    let result = explain(Agent::Vibe, "ordinary prompt text");
+
+    assert_eq!(result.state, AgentState::Idle);
+    assert_eq!(
+        result.fallback_reason.as_deref(),
+        Some(DEFAULT_KNOWN_AGENT_IDLE_FALLBACK)
+    );
+    assert!(!result.visible_idle);
+}

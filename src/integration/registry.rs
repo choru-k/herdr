@@ -24,6 +24,7 @@ pub(crate) fn integration_target_label(
         crate::api::schema::IntegrationTarget::Mastracode => "mastracode",
         crate::api::schema::IntegrationTarget::AntigravityCli => "antigravity-cli",
         crate::api::schema::IntegrationTarget::Grok => "grok",
+        crate::api::schema::IntegrationTarget::Vibe => "vibe",
     }
 }
 
@@ -53,6 +54,7 @@ pub(crate) fn integration_target_command_names(
         crate::api::schema::IntegrationTarget::Mastracode => &["mastracode"],
         crate::api::schema::IntegrationTarget::AntigravityCli => &["agy"],
         crate::api::schema::IntegrationTarget::Grok => &["grok"],
+        crate::api::schema::IntegrationTarget::Vibe => &["vibe"],
     }
 }
 
@@ -81,6 +83,7 @@ pub(crate) fn integration_target_supported(target: crate::api::schema::Integrati
                 | crate::api::schema::IntegrationTarget::Cursor
                 | crate::api::schema::IntegrationTarget::Mastracode
                 | crate::api::schema::IntegrationTarget::Grok
+                | crate::api::schema::IntegrationTarget::Vibe
         )
     }
 
@@ -264,7 +267,7 @@ fn integration_specs() -> [(
     crate::api::schema::IntegrationTarget,
     io::Result<PathBuf>,
     u32,
-); 16] {
+); 17] {
     [
         (
             crate::api::schema::IntegrationTarget::Pi,
@@ -352,6 +355,11 @@ fn integration_specs() -> [(
             grok_dir().map(|dir| dir.join("hooks").join(super::GROK_HOOK_INSTALL_NAME)),
             super::GROK_INTEGRATION_VERSION,
         ),
+        (
+            crate::api::schema::IntegrationTarget::Vibe,
+            vibe_dir().map(|dir| dir.join(super::VIBE_HOOK_INSTALL_NAME)),
+            super::VIBE_INTEGRATION_VERSION,
+        ),
     ]
 }
 
@@ -405,6 +413,51 @@ fn grok_hook_config_is_valid(hook_path: &Path) -> bool {
         .is_some_and(|config| config == super::targets::grok_hook_config(hook_path))
 }
 
+fn vibe_hook_config_is_valid(hook_path: &Path) -> bool {
+    let Some(config_dir) = hook_path.parent() else {
+        return false;
+    };
+    let Ok(content) = fs::read_to_string(config_dir.join("hooks.toml")) else {
+        return false;
+    };
+    let Ok(config) = toml::from_str::<toml::Value>(&content) else {
+        return false;
+    };
+    let Ok(Some(managed_block)) = super::config_edit::vibe_managed_hooks_config_block(&content)
+    else {
+        return false;
+    };
+    let Ok(managed_config) = toml::from_str::<toml::Value>(&managed_block) else {
+        return false;
+    };
+    vibe_named_hooks(&config)
+        .is_some_and(|hooks| hooks.len() == 1 && vibe_hook_entry_is_valid(hooks[0], hook_path))
+        && vibe_named_hooks(&managed_config)
+            .is_some_and(|hooks| hooks.len() == 1 && vibe_hook_entry_is_valid(hooks[0], hook_path))
+}
+
+fn vibe_named_hooks(config: &toml::Value) -> Option<Vec<&toml::Value>> {
+    Some(
+        config
+            .get("hooks")?
+            .as_array()?
+            .iter()
+            .filter(|hook| {
+                hook.get("name").and_then(toml::Value::as_str) == Some(super::VIBE_HOOK_NAME)
+            })
+            .collect(),
+    )
+}
+
+fn vibe_hook_entry_is_valid(hook: &toml::Value, hook_path: &Path) -> bool {
+    let Ok(expected_command) = super::command::trusted_hook_command(hook_path, None) else {
+        return false;
+    };
+    hook.get("type").and_then(toml::Value::as_str) == Some("post_agent")
+        && hook.get("command").and_then(toml::Value::as_str) == Some(expected_command.as_str())
+        && hook.get("timeout").and_then(toml::Value::as_float) == Some(10.0)
+}
+
 fn opencode_tui_integration_is_valid(plugin_path: &Path, expected_version: u32) -> bool {
     let Some(config_dir) = plugin_path.parent().and_then(Path::parent) else {
         return false;
@@ -452,6 +505,12 @@ pub(crate) fn integration_status_at(
     if target == crate::api::schema::IntegrationTarget::Grok
         && state == super::IntegrationStatusKind::Current
         && !grok_hook_config_is_valid(&path)
+    {
+        state = super::IntegrationStatusKind::Outdated;
+    }
+    if target == crate::api::schema::IntegrationTarget::Vibe
+        && state == super::IntegrationStatusKind::Current
+        && !vibe_hook_config_is_valid(&path)
     {
         state = super::IntegrationStatusKind::Outdated;
     }

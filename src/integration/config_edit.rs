@@ -3,11 +3,12 @@ use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
-use super::command::{hook_command, legacy_bash_hook_command};
+use super::command::{hook_command, legacy_bash_hook_command, trusted_hook_command};
 #[cfg(windows)]
 use super::file_ops::legacy_bash_hook_path;
 use super::{
     HERMES_PLUGIN_INSTALL_NAME, KIMI_CONFIG_BLOCK_BEGIN, KIMI_CONFIG_BLOCK_END, KIMI_HOOK_EVENTS,
+    VIBE_CONFIG_BLOCK_BEGIN, VIBE_CONFIG_BLOCK_END, VIBE_HOOK_NAME,
 };
 
 pub(crate) fn ensure_hooks_object<'a>(
@@ -808,6 +809,152 @@ pub(crate) fn remove_kimi_config_block(content: &str) -> String {
     } else {
         result
     }
+}
+
+pub(crate) fn build_vibe_hooks_config_with_hook(
+    content: &str,
+    hook_path: &Path,
+) -> io::Result<String> {
+    validate_vibe_hooks_toml(content)?;
+    let unmanaged = remove_vibe_hooks_config_block(content)?;
+
+    let mut result = unmanaged.trim_end_matches('\n').to_string();
+    if !result.is_empty() {
+        result.push('\n');
+        result.push('\n');
+    }
+    result.push_str(VIBE_CONFIG_BLOCK_BEGIN);
+    result.push('\n');
+    result.push_str("[[hooks]]\n");
+    result.push_str(&format!("name = {}\n", toml_basic_string(VIBE_HOOK_NAME)));
+    result.push_str("type = \"post_agent\"\n");
+    result.push_str(&format!(
+        "command = {}\n",
+        toml_basic_string(&trusted_hook_command(hook_path, None)?)
+    ));
+    result.push_str("timeout = 10.0\n");
+    result.push_str(VIBE_CONFIG_BLOCK_END);
+    result.push('\n');
+    validate_vibe_hooks_toml(&result)?;
+    Ok(result)
+}
+
+pub(crate) fn remove_vibe_hooks_config_block(content: &str) -> io::Result<String> {
+    validate_vibe_hooks_toml(content)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let unmanaged = if let Some((start, end)) = vibe_marker_block_range(content, &lines)? {
+        let trailing_newline = content.ends_with('\n');
+        let kept = lines
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index < start || *index > end)
+            .map(|(_, line)| (*line).to_string())
+            .collect();
+        let mut result = join_toml_lines(kept, trailing_newline);
+        while result.ends_with("\n\n") {
+            result.pop();
+        }
+        if result == "\n" {
+            String::new()
+        } else {
+            result
+        }
+    } else {
+        content.to_string()
+    };
+    let unmanaged_config = parse_vibe_hooks_toml(&unmanaged)?;
+    if vibe_named_hook_count(&unmanaged_config) != 0 {
+        return Err(io::Error::other(format!(
+            "vibe hooks config already contains an unowned hook named {VIBE_HOOK_NAME}"
+        )));
+    }
+    Ok(unmanaged)
+}
+
+pub(crate) fn vibe_managed_hooks_config_block(content: &str) -> io::Result<Option<String>> {
+    validate_vibe_hooks_toml(content)?;
+    let lines: Vec<&str> = content.lines().collect();
+    let Some((start, end)) = vibe_marker_block_range(content, &lines)? else {
+        return Ok(None);
+    };
+    Ok(Some(lines[start + 1..end].join("\n")))
+}
+
+fn validate_vibe_hooks_toml(content: &str) -> io::Result<()> {
+    parse_vibe_hooks_toml(content).map(|_| ())
+}
+
+fn parse_vibe_hooks_toml(content: &str) -> io::Result<toml::Value> {
+    toml::from_str(content)
+        .map_err(|err| io::Error::other(format!("failed to parse vibe hooks config: {err}")))
+}
+
+fn vibe_named_hook_count(config: &toml::Value) -> usize {
+    config
+        .get("hooks")
+        .and_then(toml::Value::as_array)
+        .map(|hooks| {
+            hooks
+                .iter()
+                .filter(|hook| {
+                    hook.get("name").and_then(toml::Value::as_str) == Some(VIBE_HOOK_NAME)
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
+
+fn vibe_marker_block_range(content: &str, lines: &[&str]) -> io::Result<Option<(usize, usize)>> {
+    let mut open = None;
+    let mut block = None;
+    for (index, line) in lines.iter().enumerate() {
+        let marker = line.trim();
+        if marker != VIBE_CONFIG_BLOCK_BEGIN && marker != VIBE_CONFIG_BLOCK_END {
+            continue;
+        }
+        if !vibe_marker_line_is_comment(content, index) {
+            continue;
+        }
+        if marker == VIBE_CONFIG_BLOCK_BEGIN {
+            if open.is_some() {
+                return Err(io::Error::other(
+                    "vibe hooks config contains a nested herdr marker block",
+                ));
+            }
+            if block.is_some() {
+                return Err(io::Error::other(
+                    "vibe hooks config contains multiple herdr marker blocks",
+                ));
+            }
+            open = Some(index);
+        } else {
+            let Some(start) = open.take() else {
+                return Err(io::Error::other(
+                    "vibe hooks config contains an unmatched herdr marker",
+                ));
+            };
+            block = Some((start, index));
+        }
+    }
+    if open.is_some() {
+        return Err(io::Error::other(
+            "vibe hooks config contains an unterminated herdr marker block",
+        ));
+    }
+    Ok(block)
+}
+
+fn vibe_marker_line_is_comment(content: &str, target_line: usize) -> bool {
+    // The config has already parsed successfully. Replacing a comment with an
+    // invalid TOML token makes parsing fail, while the same replacement inside
+    // a multiline string remains valid string content.
+    let mut lines: Vec<String> = content.lines().map(str::to_string).collect();
+    let indentation = lines[target_line]
+        .chars()
+        .take_while(|ch| ch.is_whitespace())
+        .collect::<String>();
+    lines[target_line] = format!("{indentation}@");
+    parse_vibe_hooks_toml(&lines.join("\n")).is_err()
 }
 
 pub(crate) fn toml_basic_string(value: &str) -> String {

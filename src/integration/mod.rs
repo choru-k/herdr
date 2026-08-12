@@ -282,6 +282,21 @@ const GROK_HOOK_ASSET: &str = if cfg!(windows) {
     include_str!("assets/grok/herdr-agent-state.sh")
 };
 const GROK_INTEGRATION_VERSION: u32 = 1;
+const VIBE_MIN_VERSION: &str = "2.21.0";
+const VIBE_HOOK_INSTALL_NAME: &str = if cfg!(windows) {
+    "herdr-agent-state.ps1"
+} else {
+    "herdr-agent-state.sh"
+};
+const VIBE_HOOK_ASSET: &str = if cfg!(windows) {
+    include_str!("assets/vibe/herdr-agent-state.ps1")
+} else {
+    include_str!("assets/vibe/herdr-agent-state.sh")
+};
+const VIBE_INTEGRATION_VERSION: u32 = 1;
+const VIBE_CONFIG_BLOCK_BEGIN: &str = "# >>> herdr vibe integration";
+const VIBE_CONFIG_BLOCK_END: &str = "# <<< herdr vibe integration";
+const VIBE_HOOK_NAME: &str = "herdr-vibe-agent-session";
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";
 

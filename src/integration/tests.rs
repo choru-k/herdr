@@ -38,11 +38,17 @@ fn extract_version_triple_orders_versions() {
 }
 
 #[test]
-fn agent_version_requirement_only_set_for_kimi() {
-    let requirement = agent_version_requirement(crate::api::schema::IntegrationTarget::Kimi)
+fn agent_version_requirements_include_kimi_and_vibe() {
+    let kimi = agent_version_requirement(crate::api::schema::IntegrationTarget::Kimi)
         .expect("kimi must have a version requirement");
-    assert_eq!(requirement.binary, "kimi");
-    assert_eq!(requirement.min_version, KIMI_MIN_VERSION);
+    assert_eq!(kimi.binary, "kimi");
+    assert_eq!(kimi.min_version, KIMI_MIN_VERSION);
+    let vibe = agent_version_requirement(crate::api::schema::IntegrationTarget::Vibe)
+        .expect("vibe must have a version requirement");
+    assert_eq!(vibe.label, "mistral vibe");
+    assert_eq!(vibe.binary, "vibe");
+    assert_eq!(vibe.args, &["--version"]);
+    assert_eq!(vibe.min_version, VIBE_MIN_VERSION);
     assert!(agent_version_requirement(crate::api::schema::IntegrationTarget::Claude).is_none());
     assert!(agent_version_requirement(crate::api::schema::IntegrationTarget::Codex).is_none());
 }
@@ -105,6 +111,7 @@ fn clear_integration_path_env() {
     std::env::remove_var(ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    std::env::remove_var(VIBE_HOME_ENV_VAR);
 }
 
 fn kimi_hook_command(hook_path: &Path, action: &str) -> String {
@@ -118,6 +125,30 @@ fn kimi_config_hooks(config: &str) -> Vec<toml::Value> {
         .and_then(toml::Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn vibe_config_hooks(config: &str) -> Vec<toml::Value> {
+    let parsed: toml::Value = toml::from_str(config).unwrap();
+    parsed
+        .get("hooks")
+        .and_then(toml::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn assert_vibe_hook(config: &str, hook_path: &Path) {
+    let command = trusted_hook_command(hook_path, None).unwrap();
+    let hooks = vibe_config_hooks(config);
+    let matches = hooks
+        .iter()
+        .filter(|hook| {
+            hook.get("name").and_then(toml::Value::as_str) == Some(VIBE_HOOK_NAME)
+                && hook.get("type").and_then(toml::Value::as_str) == Some("post_agent")
+                && hook.get("command").and_then(toml::Value::as_str) == Some(command.as_str())
+                && hook.get("timeout").and_then(toml::Value::as_float) == Some(10.0)
+        })
+        .count();
+    assert_eq!(matches, 1);
 }
 
 fn assert_kimi_hook(
@@ -184,6 +215,7 @@ fn windows_supports_portable_integrations() {
     assert!(integration_target_supported(IntegrationTarget::Devin));
     assert!(integration_target_supported(IntegrationTarget::Mastracode));
     assert!(integration_target_supported(IntegrationTarget::Grok));
+    assert!(integration_target_supported(IntegrationTarget::Vibe));
 
     assert!(integration_target_supported(IntegrationTarget::Pi));
     assert!(integration_target_supported(IntegrationTarget::Omp));
@@ -218,6 +250,7 @@ fn windows_availability_includes_native_integrations() {
     fs::write(bin.join("devin.cmd"), "@echo off\r\n").unwrap();
     fs::write(bin.join("mastracode.cmd"), "@echo off\r\n").unwrap();
     fs::write(bin.join("grok.cmd"), "@echo off\r\n").unwrap();
+    fs::write(bin.join("vibe.cmd"), "@echo off\r\n").unwrap();
 
     assert!(integration_target_available(IntegrationTarget::Pi));
     assert!(integration_target_available(IntegrationTarget::Omp));
@@ -228,6 +261,7 @@ fn windows_availability_includes_native_integrations() {
     assert!(integration_target_available(IntegrationTarget::Devin));
     assert!(integration_target_available(IntegrationTarget::Mastracode));
     assert!(integration_target_available(IntegrationTarget::Grok));
+    assert!(integration_target_available(IntegrationTarget::Vibe));
 
     if let Some(path) = original_path {
         std::env::set_var("PATH", path);
@@ -4051,6 +4085,405 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
     );
 
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn vibe_target_is_supported_and_available_on_unix() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let bin = base.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let vibe = bin.join("vibe");
+    fs::write(&vibe, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = fs::metadata(&vibe).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&vibe, permissions).unwrap();
+    let original_path = std::env::var_os("PATH");
+    std::env::set_var("PATH", &bin);
+
+    assert!(integration_target_supported(
+        crate::api::schema::IntegrationTarget::Vibe
+    ));
+    assert!(integration_target_available(
+        crate::api::schema::IntegrationTarget::Vibe
+    ));
+    assert_eq!(
+        integration_target_command_names(crate::api::schema::IntegrationTarget::Vibe),
+        &["vibe"]
+    );
+
+    if let Some(path) = original_path {
+        std::env::set_var("PATH", path);
+    } else {
+        std::env::remove_var("PATH");
+    }
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_dir_honors_vibe_home_before_home_default() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let custom = base.join("custom-vibe");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&custom).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::remove_var(VIBE_HOME_ENV_VAR);
+    assert_eq!(vibe_dir().unwrap(), home.join(".vibe"));
+    std::env::set_var(VIBE_HOME_ENV_VAR, &custom);
+    assert_eq!(vibe_dir().unwrap(), custom);
+
+    std::env::remove_var("HOME");
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_assets_are_session_identity_only_on_unix_and_windows() {
+    let unix = include_str!("assets/vibe/herdr-agent-state.sh");
+    let windows = include_str!("assets/vibe/herdr-agent-state.ps1");
+    for asset in [unix, windows] {
+        assert!(asset.contains("HERDR_INTEGRATION_ID=vibe"));
+        assert!(asset.contains("HERDR_INTEGRATION_VERSION=1"));
+        assert!(asset.contains("herdr:vibe"));
+        assert!(asset.contains("post_agent"));
+        assert!(asset.contains("parent_session_id"));
+        assert!(asset.contains("transcript_path"));
+        assert!(!asset.contains("report-agent "));
+        assert!(!asset.contains("report_agent\""));
+        assert!(!asset.contains("release-agent"));
+        assert!(!asset.contains("release_agent"));
+    }
+    assert!(unix.contains("\"method\": \"pane.report_agent_session\""));
+    assert!(windows.contains("report-agent-session"));
+    assert!(windows.contains("Start-Job"));
+    assert!(windows.contains("Wait-Job -Job $job -Timeout 2"));
+    assert!(windows.contains("Stop-Job -Job $job"));
+}
+
+#[test]
+fn vibe_install_preserves_unrelated_hooks_and_is_idempotent() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    let unrelated = "[[hooks]]\nname = \"keep\"\ntype = \"post_agent\"\ncommand = \"echo keep\"\ntimeout = 3.0\n";
+    fs::write(vibe_home.join("hooks.toml"), unrelated).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+
+    let installed = install_vibe().unwrap();
+    let first = fs::read_to_string(&installed.config_path).unwrap();
+    install_vibe().unwrap();
+    let second = fs::read_to_string(&installed.config_path).unwrap();
+
+    assert_eq!(installed.hook_path, vibe_home.join(VIBE_HOOK_INSTALL_NAME));
+    assert_eq!(installed.config_path, vibe_home.join("hooks.toml"));
+    assert_eq!(
+        fs::read_to_string(&installed.hook_path).unwrap(),
+        VIBE_HOOK_ASSET
+    );
+    assert_eq!(first, second);
+    assert_eq!(first.matches(VIBE_CONFIG_BLOCK_BEGIN).count(), 1);
+    assert_eq!(first.matches(VIBE_CONFIG_BLOCK_END).count(), 1);
+    let hooks = vibe_config_hooks(&first);
+    assert_eq!(hooks.len(), 2);
+    assert!(hooks.iter().any(|hook| {
+        hook.get("name").and_then(toml::Value::as_str) == Some("keep")
+            && hook.get("command").and_then(toml::Value::as_str) == Some("echo keep")
+    }));
+    assert_vibe_hook(&first, &installed.hook_path);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_ne!(
+            fs::metadata(&installed.hook_path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o111,
+            0
+        );
+    }
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_install_target_reports_hook_config_and_minimum_version() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+
+    let messages =
+        install_target(crate::api::schema::IntegrationTarget::Vibe).expect("vibe install");
+    assert!(messages.iter().any(|message| {
+        message
+            == &format!(
+                "installed vibe integration hook to {}",
+                vibe_home.join(VIBE_HOOK_INSTALL_NAME).display()
+            )
+    }));
+    assert!(messages.iter().any(|message| {
+        message
+            == &format!(
+                "ensured vibe hooks config at {}",
+                vibe_home.join("hooks.toml").display()
+            )
+    }));
+    assert!(messages
+        .iter()
+        .any(|message| message.contains(VIBE_MIN_VERSION)));
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_install_errors_when_config_dir_is_missing() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let missing = base.join("missing-vibe");
+    std::env::set_var(VIBE_HOME_ENV_VAR, &missing);
+
+    let error = install_vibe().expect_err("missing vibe home must fail");
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "vibe config directory not found at {}. install mistral vibe first",
+            missing.display()
+        )
+    );
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_config_builder_rejects_conflicts_and_malformed_markers() {
+    let hook_path = Path::new("/tmp/herdr-agent-state.sh");
+    let conflict = format!(
+        "[[hooks]]\nname = \"{VIBE_HOOK_NAME}\"\ntype = \"post_agent\"\ncommand = \"echo user\"\ntimeout = 10.0\n"
+    );
+    assert!(build_vibe_hooks_config_with_hook(&conflict, hook_path).is_err());
+
+    for malformed in [
+        format!("{VIBE_CONFIG_BLOCK_BEGIN}\n[[hooks]]\n"),
+        format!(
+            "{VIBE_CONFIG_BLOCK_BEGIN}\n{VIBE_CONFIG_BLOCK_BEGIN}\n{VIBE_CONFIG_BLOCK_END}\n{VIBE_CONFIG_BLOCK_END}\n"
+        ),
+        format!(
+            "{VIBE_CONFIG_BLOCK_BEGIN}\n{VIBE_CONFIG_BLOCK_END}\n{VIBE_CONFIG_BLOCK_BEGIN}\n{VIBE_CONFIG_BLOCK_END}\n"
+        ),
+        format!("{VIBE_CONFIG_BLOCK_END}\n"),
+    ] {
+        assert!(
+            build_vibe_hooks_config_with_hook(&malformed, hook_path).is_err(),
+            "accepted malformed marker layout: {malformed:?}"
+        );
+    }
+    assert!(build_vibe_hooks_config_with_hook("[[hooks]\n", hook_path).is_err());
+
+    assert!(build_vibe_hooks_config_with_hook("hooks = []\n", hook_path).is_err());
+
+    let marker_text = format!(
+        "note = \"\"\"\n{VIBE_CONFIG_BLOCK_BEGIN}\nkeep\n{VIBE_CONFIG_BLOCK_END}\n\"\"\"\n"
+    );
+    let with_hook = build_vibe_hooks_config_with_hook(&marker_text, hook_path)
+        .expect("marker-looking multiline string contents must be preserved");
+    assert_eq!(
+        toml::from_str::<toml::Value>(&with_hook).unwrap()["note"].as_str(),
+        toml::from_str::<toml::Value>(&marker_text).unwrap()["note"].as_str()
+    );
+    assert_eq!(
+        remove_vibe_hooks_config_block(&with_hook).unwrap(),
+        marker_text
+    );
+}
+
+#[test]
+fn vibe_install_refuses_invalid_config_without_file_loss() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+    let hook_path = vibe_home.join(VIBE_HOOK_INSTALL_NAME);
+    let config_path = vibe_home.join("hooks.toml");
+    fs::write(&hook_path, "user asset").unwrap();
+    let conflict = format!(
+        "[[hooks]]\nname = \"{VIBE_HOOK_NAME}\"\ntype = \"post_agent\"\ncommand = \"echo user\"\ntimeout = 10.0\n"
+    );
+    fs::write(&config_path, &conflict).unwrap();
+
+    assert!(install_vibe().is_err());
+    assert_eq!(fs::read_to_string(&hook_path).unwrap(), "user asset");
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), conflict);
+
+    let malformed = format!("{VIBE_CONFIG_BLOCK_BEGIN}\n[[hooks]]\nname = \"stale\"\n");
+    fs::write(&config_path, &malformed).unwrap();
+    assert!(install_vibe().is_err());
+    assert_eq!(fs::read_to_string(&hook_path).unwrap(), "user asset");
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), malformed);
+
+    let predeclared_hooks = "hooks = []\n";
+    fs::write(&config_path, predeclared_hooks).unwrap();
+    assert!(install_vibe().is_err());
+    assert_eq!(fs::read_to_string(&hook_path).unwrap(), "user asset");
+    assert_eq!(fs::read_to_string(&config_path).unwrap(), predeclared_hooks);
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_uninstall_is_selective_and_idempotent() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+    let unrelated = "[[hooks]]\nname = \"keep\"\ntype = \"post_agent\"\ncommand = \"echo keep\"\ntimeout = 3.0\n";
+    fs::write(vibe_home.join("hooks.toml"), unrelated).unwrap();
+    let installed = install_vibe().unwrap();
+
+    let first = uninstall_vibe().unwrap();
+    assert!(first.removed_hook_file);
+    assert!(first.updated_config);
+    assert!(!installed.hook_path.exists());
+    assert_eq!(
+        fs::read_to_string(&installed.config_path).unwrap(),
+        unrelated
+    );
+    let second = uninstall_vibe().unwrap();
+    assert!(!second.removed_hook_file);
+    assert!(!second.updated_config);
+    assert_eq!(
+        fs::read_to_string(&installed.config_path).unwrap(),
+        unrelated
+    );
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_uninstall_refuses_unowned_same_name_hook_without_file_loss() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+    let installed = install_vibe().unwrap();
+    let conflict = format!(
+        "{}\n[[hooks]]\nname = \"{VIBE_HOOK_NAME}\"\ntype = \"post_agent\"\ncommand = \"echo user\"\ntimeout = 10.0\n",
+        fs::read_to_string(&installed.config_path).unwrap()
+    );
+    fs::write(&installed.config_path, &conflict).unwrap();
+
+    assert!(uninstall_vibe().is_err());
+    assert!(installed.hook_path.is_file());
+    assert_eq!(
+        fs::read_to_string(&installed.config_path).unwrap(),
+        conflict
+    );
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_uninstall_keeps_asset_when_config_is_invalid() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+    let installed = install_vibe().unwrap();
+    fs::write(&installed.config_path, "[[hooks]\n").unwrap();
+
+    assert!(uninstall_vibe().is_err());
+    assert!(installed.hook_path.is_file());
+
+    clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn vibe_status_requires_current_asset_and_exact_managed_hook() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let vibe_home = base.join("vibe");
+    fs::create_dir_all(&vibe_home).unwrap();
+    std::env::set_var(VIBE_HOME_ENV_VAR, &vibe_home);
+    let installed = install_vibe().unwrap();
+    let valid_config = fs::read_to_string(&installed.config_path).unwrap();
+    let status = || {
+        integration_status_at(
+            crate::api::schema::IntegrationTarget::Vibe,
+            installed.hook_path.clone(),
+            VIBE_INTEGRATION_VERSION,
+        )
+        .state
+    };
+    assert_eq!(status(), IntegrationStatusKind::Current);
+
+    fs::remove_file(&installed.config_path).unwrap();
+    assert_eq!(status(), IntegrationStatusKind::Outdated);
+    fs::write(&installed.config_path, "[[hooks]\n").unwrap();
+    assert_eq!(status(), IntegrationStatusKind::Outdated);
+
+    let duplicate = format!(
+        "{valid_config}\n[[hooks]]\nname = \"{VIBE_HOOK_NAME}\"\ntype = \"post_agent\"\ncommand = \"echo shadow\"\ntimeout = 10.0\n"
+    );
+    fs::write(&installed.config_path, duplicate).unwrap();
+    assert_eq!(status(), IntegrationStatusKind::Outdated);
+
+    for stale in [
+        valid_config.replace("type = \"post_agent\"", "type = \"pre_tool\""),
+        valid_config.replace(
+            &format!(
+                "command = {}",
+                toml_basic_string(&trusted_hook_command(&installed.hook_path, None).unwrap())
+            ),
+            "command = \"echo wrong\"",
+        ),
+        valid_config.replace("timeout = 10.0", "timeout = 9.0"),
+        valid_config.replace(VIBE_CONFIG_BLOCK_END, ""),
+    ] {
+        fs::write(&installed.config_path, stale).unwrap();
+        assert_eq!(status(), IntegrationStatusKind::Outdated);
+    }
+
+    fs::write(&installed.config_path, &valid_config).unwrap();
+    fs::write(
+        &installed.hook_path,
+        "# HERDR_INTEGRATION_ID=vibe\n# HERDR_INTEGRATION_VERSION=0\n",
+    )
+    .unwrap();
+    assert_eq!(status(), IntegrationStatusKind::Outdated);
+
+    fs::write(&installed.hook_path, VIBE_HOOK_ASSET).unwrap();
+    fs::write(
+        &installed.config_path,
+        valid_config.replace("timeout = 10.0", "timeout = 7.0"),
+    )
+    .unwrap();
+    install_vibe().unwrap();
+    assert_eq!(status(), IntegrationStatusKind::Current);
+    assert_vibe_hook(
+        &fs::read_to_string(&installed.config_path).unwrap(),
+        &installed.hook_path,
+    );
+
     clear_integration_path_env();
     let _ = fs::remove_dir_all(base);
 }

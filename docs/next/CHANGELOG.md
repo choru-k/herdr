@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- Added Mistral Vibe screen detection for live working and blocked states, optional cross-platform session reporting, and native restore with `vibe --resume <id>`.
 - Herdr now keeps the outer terminal window title in sync with the session through `ui.window_title`, so window managers and terminal tab bars show the active workspace and the host the panes actually run on.
 - The desktop tab bar now has configurable right-aligned status entries for zoom state, hostname, date/time, literal text, and asynchronously refreshed command output.
 - Optional `keys.move_tab_previous` and `keys.move_tab_next` bindings now reorder the active tab in place, wrapping at either end.

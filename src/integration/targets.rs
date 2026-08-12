@@ -11,16 +11,17 @@ use super::command::hook_command;
 #[cfg(not(windows))]
 use super::command::shell_single_quote;
 use super::config_edit::{
-    build_codex_config_with_hooks, build_kimi_config_with_hooks, ensure_command_hook,
-    ensure_direct_command_hook, ensure_flat_command_hook, ensure_hermes_plugin_enabled,
-    ensure_hooks_object, ensure_simple_command_hook, hooks_object_if_present,
-    remove_direct_hook_commands, remove_flat_command_hook, remove_hermes_plugin_enabled,
-    remove_hook_commands, remove_kimi_config_block, remove_simple_command_hook,
+    build_codex_config_with_hooks, build_kimi_config_with_hooks, build_vibe_hooks_config_with_hook,
+    ensure_command_hook, ensure_direct_command_hook, ensure_flat_command_hook,
+    ensure_hermes_plugin_enabled, ensure_hooks_object, ensure_simple_command_hook,
+    hooks_object_if_present, remove_direct_hook_commands, remove_flat_command_hook,
+    remove_hermes_plugin_enabled, remove_hook_commands, remove_kimi_config_block,
+    remove_simple_command_hook, remove_vibe_hooks_config_block,
 };
 use super::env::{
     antigravity_cli_dir, claude_dir, codex_dir, copilot_dir, cursor_dir, devin_dir, droid_dir,
     grok_dir, hermes_dir, hermes_plugin_dir, kilo_dir, kimi_dir, mastracode_dir, omp_extension_dir,
-    opencode_dir, pi_extension_dir, qodercli_dir,
+    opencode_dir, pi_extension_dir, qodercli_dir, vibe_dir,
 };
 use super::file_ops::{
     make_executable, remove_dir_all_if_exists, remove_file_if_exists, remove_legacy_bash_hook_file,
@@ -37,6 +38,7 @@ use super::types::{
     KiloUninstallResult, KimiInstallPaths, KimiUninstallResult, MastracodeInstallPaths,
     MastracodeUninstallResult, OmpInstallPaths, OmpUninstallResult, OpenCodeInstallPaths,
     OpenCodeUninstallResult, PiUninstallResult, QodercliInstallPaths, QodercliUninstallResult,
+    VibeInstallPaths, VibeUninstallResult,
 };
 use super::{
     ANTIGRAVITY_CLI_HOOK_ASSET, ANTIGRAVITY_CLI_HOOK_BLOCK_NAME, ANTIGRAVITY_CLI_HOOK_EVENTS,
@@ -55,6 +57,7 @@ use super::{
     OPENCODE_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME,
     OPENCODE_TUI_PLUGIN_SPEC, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET,
     QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
+    VIBE_HOOK_ASSET, VIBE_HOOK_INSTALL_NAME,
 };
 
 fn ensure_extension_dir(dir: &Path, agent: &str) -> io::Result<()> {
@@ -1387,5 +1390,59 @@ pub(crate) fn uninstall_grok() -> io::Result<GrokUninstallResult> {
         config_path,
         removed_hook_file,
         removed_config_file,
+    })
+}
+
+pub(crate) fn install_vibe() -> io::Result<VibeInstallPaths> {
+    let dir = vibe_dir()?;
+    if !dir.is_dir() {
+        return Err(io::Error::other(format!(
+            "vibe config directory not found at {}. install mistral vibe first",
+            dir.display()
+        )));
+    }
+
+    let hook_path = dir.join(VIBE_HOOK_INSTALL_NAME);
+    let config_path = dir.join("hooks.toml");
+    let existing_config = if config_path.exists() {
+        fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+    let new_config = build_vibe_hooks_config_with_hook(&existing_config, &hook_path)?;
+
+    fs::write(&hook_path, VIBE_HOOK_ASSET)?;
+    make_executable(&hook_path)?;
+    if new_config != existing_config {
+        fs::write(&config_path, new_config)?;
+    }
+
+    Ok(VibeInstallPaths {
+        hook_path,
+        config_path,
+    })
+}
+
+pub(crate) fn uninstall_vibe() -> io::Result<VibeUninstallResult> {
+    let dir = vibe_dir()?;
+    let hook_path = dir.join(VIBE_HOOK_INSTALL_NAME);
+    let config_path = dir.join("hooks.toml");
+    let mut updated_config = false;
+
+    if config_path.exists() {
+        let existing_config = fs::read_to_string(&config_path)?;
+        let new_config = remove_vibe_hooks_config_block(&existing_config)?;
+        if new_config != existing_config {
+            fs::write(&config_path, new_config)?;
+            updated_config = true;
+        }
+    }
+
+    let removed_hook_file = remove_file_if_exists(&hook_path)?;
+    Ok(VibeUninstallResult {
+        hook_path,
+        config_path,
+        removed_hook_file,
+        updated_config,
     })
 }
